@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ボイスメモ</title>
+<style>
+  :root {
+    --bg: #FAF8F5;
+    --surface: #FFFFFF;
+    --line: #E6E1D8;
+    --text: #1B1A18;
+    --text-dim: #8C8579;
+    --accent: #D8472F;
+    --accent-soft: rgba(216, 71, 47, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    color: var(--text);
+  }
+
+  .app {
+    max-width: 420px;
+    margin: 0 auto;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 28px 20px 40px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    margin: 0;
+    color: var(--text-dim);
+  }
+
+  /* --- Recording panel --- */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 32px 24px;
+    text-align: center;
+    margin-bottom: 28px;
+  }
+
+  .status {
+    font-size: 13px;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+    height: 18px;
+    margin-bottom: 14px;
+  }
+
+  .status.live { color: var(--accent); }
+
+  .timer {
+    font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+    font-size: 44px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin-bottom: 18px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  canvas#viz {
+    width: 100%;
+    height: 56px;
+    display: block;
+    margin-bottom: 22px;
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 22px;
+  }
+
+  .rec-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    cursor: pointer;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.15s ease;
+  }
+  .rec-btn:active { transform: scale(0.94); }
+
+  .rec-btn::after {
+    content: "";
+    width: 24px;
+    height: 24px;
+    background: #fff;
+    border-radius: 4px;
+  }
+  .rec-btn.recording::after {
+    border-radius: 4px;
+  }
+  .rec-btn.paused::after {
+    width: 0;
+    height: 0;
+    border-radius: 0;
+    background: transparent;
+    border-style: solid;
+    border-width: 12px 0 12px 20px;
+    border-color: transparent transparent transparent #fff;
+    margin-left: 4px;
+  }
+
+  .ring {
+    position: absolute;
+    inset: -8px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    opacity: 0;
+  }
+  .rec-btn.recording .ring {
+    opacity: 1;
+    animation: pulse 1.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { transform: scale(0.9); opacity: 0.6; }
+    100% { transform: scale(1.5); opacity: 0; }
+  }
+
+  .pause-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pause-btn:hover { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+  .hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /* --- List --- */
+  .list-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 4px 2px 10px;
+  }
+
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 13px;
+    padding: 24px 0;
+    border: 1px dashed var(--line);
+    border-radius: 14px;
+  }
+
+  .item {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .play-btn {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    border-radius: 50%;
+    border: none;
+    background: var(--text);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+  }
+  .play-btn.playing { background: var(--accent); }
+
+  .item-info { flex: 1; min-width: 0; }
+  .item-name {
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .item-meta {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bar-track {
+    height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    margin-top: 6px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+  }
+
+  .icon-btn {
+    width: 30px;
+    height: 30px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .icon-btn:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header><h1>ボイスメモ</h1></header>
+
+    <div class="panel">
+      <div class="status" id="status">準備中…</div>
+      <div class="timer" id="timer">00:00</div>
+      <canvas id="viz" width="320" height="56"></canvas>
+      <div class="controls">
+        <button class="pause-btn" id="pauseBtn" title="一時停止" style="visibility:hidden;">⏸</button>
+        <button class="rec-btn" id="recBtn">
+          <span class="ring"></span>
+        </button>
+        <div style="width:46px"></div>
+      </div>
+      <div class="hint" id="hint">マイクへのアクセスを待っています</div>
+    </div>
+
+    <div class="list-label">録音履歴</div>
+    <div class="list" id="list">
+      <div class="empty" id="emptyMsg">録音はまだありません</div>
+    </div>
+  </div>
+
+<script>
+let mediaRecorder, audioChunks = [], stream, audioCtx, analyser, dataArray, rafId;
+let startTime, elapsedBeforePause = 0, timerInterval, isPaused = false, isRecording = false;
+let recordings = [];
+let recCounter = 0;
+let currentlyPlaying = null;
+
+const statusEl = document.getElementById('status');
+const timerEl = document.getElementById('timer');
+const recBtn = document.getElementById('recBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const hintEl = document.getElementById('hint');
+const listEl = document.getElementById('list');
+const emptyMsg = document.getElementById('emptyMsg');
+const canvas = document.getElementById('viz');
+const ctx = canvas.getContext('2d');
+
+function fmtTime(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const m = String(Math.floor(totalSec / 60)).padStart(2, '0');
+  const s = String(totalSec % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+function resizeCanvas() {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = rect.width * devicePixelRatio;
+  canvas.height = rect.height * devicePixelRatio;
+}
+window.addEventListener('resize', resizeCanvas);
+
+function drawViz() {
+  rafId = requestAnimationFrame(drawViz);
+  if (!analyser) return;
+  analyser.getByteFrequencyData(dataArray);
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const barCount = 40;
+  const step = Math.floor(dataArray.length / barCount);
+  const barWidth = w / barCount * 0.6;
+  const gap = w / barCount;
+  ctx.fillStyle = isPaused ? '#C9C2B5' : '#D8472F';
+  for (let i = 0; i < barCount; i++) {
+    const v = dataArray[i * step] / 255;
+    const barH = Math.max(2 * devicePixelRatio, v * h * 0.95);
+    const x = i * gap + (gap - barWidth) / 2;
+    const y = (h - barH) / 2;
+    ctx.fillRect(x, y, barWidth, barH);
+  }
+}
+
+async function initMic() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    statusEl.textContent = 'マイク準備完了';
+    hintEl.textContent = '';
+    resizeCanvas();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    source.connect(analyser);
+    drawViz();
+    startRecording();
+  } catch (err) {
+    statusEl.textContent = 'マイクにアクセスできません';
+    hintEl.textContent = 'ブラウザの設定でマイクの使用を許可してください';
+    recBtn.disabled = true;
+  }
+}
+
+function startRecording() {
+  audioChunks = [];
+  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = () => {
+    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+    const url = URL.createObjectURL(blob);
+    const duration = elapsedBeforePause + (Date.now() - startTime);
+    addRecording(url, duration);
+  };
+  mediaRecorder.start();
+  isRecording = true;
+  isPaused = false;
+  elapsedBeforePause = 0;
+  startTime = Date.now();
+  recBtn.classList.add('recording');
+  recBtn.classList.remove('paused');
+  pauseBtn.style.visibility = 'visible';
+  pauseBtn.textContent = '⏸';
+  statusEl.textContent = '録音中';
+  statusEl.classList.add('live');
+  startTimer();
+}
+
+function startTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(() => {
+    const elapsed = elapsedBeforePause + (isPaused ? 0 : Date.now() - startTime);
+    timerEl.textContent = fmtTime(elapsed);
+  }, 200);
+}
+
+function togglePause() {
+  if (!isRecording) return;
+  if (!isPaused) {
+    mediaRecorder.pause();
+    elapsedBeforePause += Date.now() - startTime;
+    isPaused = true;
+    recBtn.classList.add('paused');
+    recBtn.classList.remove('recording');
+    pauseBtn.textContent = '▶';
+    statusEl.textContent = '一時停止中';
+    statusEl.classList.remove('live');
+  } else {
+    mediaRecorder.resume();
+    startTime = Date.now();
+    isPaused = false;
+    recBtn.classList.remove('paused');
+    recBtn.classList.add('recording');
+    pauseBtn.textContent = '⏸';
+    statusEl.textContent = '録音中';
+    statusEl.classList.add('live');
+  }
+}
+
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+  isPaused = false;
+  mediaRecorder.stop();
+  clearInterval(timerInterval);
+  recBtn.classList.remove('recording', 'paused');
+  pauseBtn.style.visibility = 'hidden';
+  statusEl.textContent = '保存しました';
+  statusEl.classList.remove('live');
+  timerEl.textContent = '00:00';
+  setTimeout(() => { if (!isRecording) statusEl.textContent = '待機中'; }, 1500);
+}
+
+recBtn.addEventListener('click', () => {
+  if (!isRecording) startRecording();
+  else stopRecording();
+});
+pauseBtn.addEventListener('click', togglePause);
+
+function addRecording(url, durationMs) {
+  recCounter++;
+  const id = recCounter;
+  const now = new Date();
+  const label = `録音 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  recordings.unshift({ id, url, durationMs, label });
+  renderList();
+}
+
+function renderList() {
+  emptyMsg.style.display = recordings.length ? 'none' : 'block';
+  listEl.querySelectorAll('.item').forEach(el => el.remove());
+  recordings.forEach(rec => {
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.innerHTML = `
+      <button class="play-btn" data-id="${rec.id}">▶</button>
+      <div class="item-info">
+        <div class="item-name">${rec.label}</div>
+        <div class="item-meta"><span class="cur">00:00</span> / ${fmtTime(rec.durationMs)}</div>
+        <div class="bar-track"><div class="bar-fill"></div></div>
+      </div>
+      <button class="icon-btn dl" data-id="${rec.id}" title="ダウンロード">⬇</button>
+      <button class="icon-btn del" data-id="${rec.id}" title="削除">✕</button>
+    `;
+    listEl.appendChild(item);
+
+    const audio = new Audio(rec.url);
+    const playBtn = item.querySelector('.play-btn');
+    const curEl = item.querySelector('.cur');
+    const fill = item.querySelector('.bar-fill');
+
+    playBtn.addEventListener('click', () => {
+      if (currentlyPlaying && currentlyPlaying !== audio) {
+        currentlyPlaying.pause();
+        currentlyPlaying.currentTime = 0;
+        document.querySelectorAll('.play-btn.playing').forEach(b => { b.classList.remove('playing'); b.textContent='▶'; });
+      }
+      if (audio.paused) {
+        audio.play();
+        playBtn.classList.add('playing');
+        playBtn.textContent = '⏸';
+        currentlyPlaying = audio;
+      } else {
+        audio.pause();
+        playBtn.classList.remove('playing');
+        playBtn.textContent = '▶';
+      }
+    });
+
+    audio.addEventListener('timeupdate', () => {
+      curEl.textContent = fmtTime(audio.currentTime * 1000);
+      fill.style.width = `${(audio.currentTime / (audio.duration || rec.durationMs/1000)) * 100}%`;
+    });
+    audio.addEventListener('ended', () => {
+      playBtn.classList.remove('playing');
+      playBtn.textContent = '▶';
+      fill.style.width = '0%';
+      curEl.textContent = '00:00';
+    });
+
+    item.querySelector('.dl').addEventListener('click', () => {
+      const a = document.createElement('a');
+      a.href = rec.url;
+      a.download = `${rec.label}.webm`;
+      a.click();
+    });
+    item.querySelector('.del').addEventListener('click', () => {
+      if (currentlyPlaying === audio) { audio.pause(); currentlyPlaying = null; }
+      recordings = recordings.filter(r => r.id !== rec.id);
+      renderList();
+    });
+  });
+}
+
+initMic();
+</script>
+</body>
+</html>

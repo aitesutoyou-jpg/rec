@@ -194,6 +194,12 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .item.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
 
   .play-btn {
@@ -277,8 +283,17 @@
 let mediaRecorder, audioChunks = [], stream, audioCtx, analyser, dataArray, rafId;
 let startTime, elapsedBeforePause = 0, timerInterval, isPaused = false, isRecording = false;
 let recordings = [];
-let recCounter = 0;
 let currentlyPlaying = null;
+
+function formatDateTimeLabel(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mi = String(date.getMinutes()).padStart(2, '0');
+  const ss = String(date.getSeconds()).padStart(2, '0');
+  return `${yyyy}/${mm}/${dd} ${hh}:${mi}:${ss}`;
+}
 
 const statusEl = document.getElementById('status');
 const timerEl = document.getElementById('timer');
@@ -421,10 +436,9 @@ recBtn.addEventListener('click', () => {
 pauseBtn.addEventListener('click', togglePause);
 
 function addRecording(url, durationMs) {
-  recCounter++;
-  const id = recCounter;
   const now = new Date();
-  const label = `録音 ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  const id = String(now.getTime());
+  const label = formatDateTimeLabel(now);
   recordings.unshift({ id, url, durationMs, label });
   renderList();
 }
@@ -435,6 +449,7 @@ function renderList() {
   recordings.forEach(rec => {
     const item = document.createElement('div');
     item.className = 'item';
+    item.dataset.id = rec.id;
     item.innerHTML = `
       <button class="play-btn" data-id="${rec.id}">▶</button>
       <div class="item-info">
@@ -452,27 +467,40 @@ function renderList() {
     const curEl = item.querySelector('.cur');
     const fill = item.querySelector('.bar-fill');
 
-    playBtn.addEventListener('click', () => {
-      if (currentlyPlaying && currentlyPlaying !== audio) {
-        currentlyPlaying.pause();
-        currentlyPlaying.currentTime = 0;
-        document.querySelectorAll('.play-btn.playing').forEach(b => { b.classList.remove('playing'); b.textContent='▶'; });
+    function selectItem() {
+      document.querySelectorAll('.item.selected').forEach(el => el.classList.remove('selected'));
+      item.classList.add('selected');
+    }
+
+    function playThis() {
+      selectItem();
+      if (currentlyPlaying && currentlyPlaying.audio !== audio) {
+        currentlyPlaying.audio.pause();
+        currentlyPlaying.audio.currentTime = 0;
+        currentlyPlaying.btn.classList.remove('playing');
+        currentlyPlaying.btn.textContent = '▶';
       }
       if (audio.paused) {
         audio.play();
         playBtn.classList.add('playing');
         playBtn.textContent = '⏸';
-        currentlyPlaying = audio;
+        currentlyPlaying = { audio, btn: playBtn };
       } else {
         audio.pause();
         playBtn.classList.remove('playing');
         playBtn.textContent = '▶';
       }
+    }
+
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      selectItem();
     });
+    playBtn.addEventListener('click', (e) => { e.stopPropagation(); playThis(); });
 
     audio.addEventListener('timeupdate', () => {
       curEl.textContent = fmtTime(audio.currentTime * 1000);
-      fill.style.width = `${(audio.currentTime / (audio.duration || rec.durationMs/1000)) * 100}%`;
+      fill.style.width = `${(audio.currentTime / (audio.duration || rec.durationMs / 1000)) * 100}%`;
     });
     audio.addEventListener('ended', () => {
       playBtn.classList.remove('playing');
@@ -481,14 +509,16 @@ function renderList() {
       curEl.textContent = '00:00';
     });
 
-    item.querySelector('.dl').addEventListener('click', () => {
-      const a = document.createElement('a');
-      a.href = rec.url;
-      a.download = `${rec.label}.webm`;
-      a.click();
+    item.querySelector('.dl').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const link = document.createElement('a');
+      link.href = rec.url;
+      link.download = `${rec.label.replace(/[/:]/g, '-')}.webm`;
+      link.click();
     });
-    item.querySelector('.del').addEventListener('click', () => {
-      if (currentlyPlaying === audio) { audio.pause(); currentlyPlaying = null; }
+    item.querySelector('.del').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (currentlyPlaying && currentlyPlaying.audio === audio) { audio.pause(); currentlyPlaying = null; }
       recordings = recordings.filter(r => r.id !== rec.id);
       renderList();
     });

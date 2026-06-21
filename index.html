@@ -164,12 +164,29 @@
   }
 
   /* --- List --- */
+  .list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 4px 2px 10px;
+  }
+
   .list-label {
     font-size: 12px;
     letter-spacing: 0.08em;
     color: var(--text-dim);
-    margin: 4px 2px 10px;
   }
+
+  .import-btn {
+    font-size: 12px;
+    color: var(--text-dim);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  .import-btn:hover { color: var(--accent); border-color: var(--accent); }
 
   .list {
     display: flex;
@@ -253,6 +270,32 @@
     font-size: 14px;
   }
   .icon-btn:hover { color: var(--accent); }
+
+  .transcript-box {
+    text-align: left;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 18px;
+    max-height: 96px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+    display: none;
+  }
+  .transcript-box.active { display: block; }
+  .transcript-box .placeholder { color: var(--text-dim); }
+  .transcript-box .interim { color: var(--text-dim); }
+
+  .item-transcript {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
 </style>
 </head>
 <body>
@@ -263,6 +306,9 @@
       <div class="status" id="status">準備中…</div>
       <div class="timer" id="timer">00:00</div>
       <canvas id="viz" width="320" height="56"></canvas>
+      <div class="transcript-box" id="transcriptBox">
+        <span class="placeholder" id="transcriptPlaceholder">音声を認識しています…</span>
+      </div>
       <div class="controls">
         <button class="pause-btn" id="pauseBtn" title="一時停止" style="visibility:hidden;">⏸</button>
         <button class="rec-btn" id="recBtn">
@@ -273,7 +319,11 @@
       <div class="hint" id="hint">マイクへのアクセスを待っています</div>
     </div>
 
-    <div class="list-label">録音履歴</div>
+    <div class="list-header">
+      <div class="list-label">録音履歴</div>
+      <button class="import-btn" id="importBtn">＋ 端末から読み込む</button>
+      <input type="file" id="fileInput" accept="audio/*,video/mp4,.mp4,.m4a,.mp3,.wav" multiple style="display:none;">
+    </div>
     <div class="list" id="list">
       <div class="empty" id="emptyMsg">録音はまだありません</div>
     </div>
@@ -304,6 +354,83 @@ const listEl = document.getElementById('list');
 const emptyMsg = document.getElementById('emptyMsg');
 const canvas = document.getElementById('viz');
 const ctx = canvas.getContext('2d');
+const transcriptBox = document.getElementById('transcriptBox');
+const transcriptPlaceholder = document.getElementById('transcriptPlaceholder');
+
+// --- Speech recognition (live transcription) ---
+const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+const recognitionSupported = !!SpeechRecognitionImpl;
+let recognition = null;
+let finalTranscript = '';
+let recognitionShouldRun = false;
+
+function renderTranscriptLive(interim) {
+  transcriptBox.classList.add('active');
+  const finalHtml = finalTranscript ? finalTranscript.replace(/</g, '&lt;') : '';
+  const interimHtml = interim ? `<span class="interim">${interim.replace(/</g, '&lt;')}</span>` : '';
+  if (!finalHtml && !interimHtml) {
+    transcriptBox.innerHTML = '<span class="placeholder">音声を認識しています…</span>';
+  } else {
+    transcriptBox.innerHTML = finalHtml + interimHtml;
+  }
+  transcriptBox.scrollTop = transcriptBox.scrollHeight;
+}
+
+if (recognitionSupported) {
+  recognition = new SpeechRecognitionImpl();
+  recognition.lang = 'ja-JP';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event) => {
+    let interim = '';
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const text = event.results[i][0].transcript;
+      if (event.results[i].isFinal) finalTranscript += text;
+      else interim += text;
+    }
+    renderTranscriptLive(interim);
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      recognitionShouldRun = false;
+    }
+  };
+
+  recognition.onend = () => {
+    if (recognitionShouldRun) {
+      try { recognition.start(); } catch (e) { /* already running */ }
+    }
+  };
+}
+
+function startTranscription() {
+  if (!recognitionSupported) return;
+  finalTranscript = '';
+  transcriptBox.classList.add('active');
+  transcriptBox.innerHTML = '<span class="placeholder">音声を認識しています…</span>';
+  recognitionShouldRun = true;
+  try { recognition.start(); } catch (e) { /* already started */ }
+}
+
+function pauseTranscription() {
+  if (!recognitionSupported) return;
+  recognitionShouldRun = false;
+  try { recognition.stop(); } catch (e) { /* noop */ }
+}
+
+function resumeTranscription() {
+  if (!recognitionSupported) return;
+  recognitionShouldRun = true;
+  try { recognition.start(); } catch (e) { /* noop */ }
+}
+
+function stopTranscription() {
+  if (!recognitionSupported) return;
+  recognitionShouldRun = false;
+  try { recognition.stop(); } catch (e) { /* noop */ }
+}
 
 function fmtTime(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -343,7 +470,7 @@ async function initMic() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     statusEl.textContent = 'マイク準備完了';
-    hintEl.textContent = '';
+    hintEl.textContent = recognitionSupported ? '' : 'このブラウザは文字起こしに対応していません';
     resizeCanvas();
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     const source = audioCtx.createMediaStreamSource(stream);
@@ -360,6 +487,31 @@ async function initMic() {
   }
 }
 
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (e) { /* not available right now */ }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && isRecording && !isPaused) {
+    requestWakeLock();
+    if (recognitionSupported && recognitionShouldRun) {
+      try { recognition.start(); } catch (e) { /* already running */ }
+    }
+  }
+});
+
 function startRecording() {
   audioChunks = [];
   mediaRecorder = new MediaRecorder(stream);
@@ -368,7 +520,7 @@ function startRecording() {
     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
     const url = URL.createObjectURL(blob);
     const duration = elapsedBeforePause + (Date.now() - startTime);
-    addRecording(url, duration);
+    addRecording(url, duration, finalTranscript.trim());
   };
   mediaRecorder.start();
   isRecording = true;
@@ -382,6 +534,8 @@ function startRecording() {
   statusEl.textContent = '録音中';
   statusEl.classList.add('live');
   startTimer();
+  startTranscription();
+  requestWakeLock();
 }
 
 function startTimer() {
@@ -403,6 +557,8 @@ function togglePause() {
     pauseBtn.textContent = '▶';
     statusEl.textContent = '一時停止中';
     statusEl.classList.remove('live');
+    pauseTranscription();
+    releaseWakeLock();
   } else {
     mediaRecorder.resume();
     startTime = Date.now();
@@ -412,6 +568,8 @@ function togglePause() {
     pauseBtn.textContent = '⏸';
     statusEl.textContent = '録音中';
     statusEl.classList.add('live');
+    resumeTranscription();
+    requestWakeLock();
   }
 }
 
@@ -426,6 +584,9 @@ function stopRecording() {
   statusEl.textContent = '保存しました';
   statusEl.classList.remove('live');
   timerEl.textContent = '00:00';
+  stopTranscription();
+  releaseWakeLock();
+  transcriptBox.classList.remove('active');
   setTimeout(() => { if (!isRecording) statusEl.textContent = '待機中'; }, 1500);
 }
 
@@ -435,11 +596,11 @@ recBtn.addEventListener('click', () => {
 });
 pauseBtn.addEventListener('click', togglePause);
 
-function addRecording(url, durationMs) {
+function addRecording(url, durationMs, transcript) {
   const now = new Date();
   const id = String(now.getTime());
   const label = formatDateTimeLabel(now);
-  recordings.unshift({ id, url, durationMs, label });
+  recordings.unshift({ id, url, durationMs, label, transcript: transcript || '' });
   renderList();
 }
 
@@ -450,12 +611,16 @@ function renderList() {
     const item = document.createElement('div');
     item.className = 'item';
     item.dataset.id = rec.id;
+    const transcriptHtml = rec.transcript
+      ? `<div class="item-transcript">${rec.transcript.replace(/</g, '&lt;')}</div>`
+      : '';
     item.innerHTML = `
       <button class="play-btn" data-id="${rec.id}">▶</button>
       <div class="item-info">
         <div class="item-name">${rec.label}</div>
         <div class="item-meta"><span class="cur">00:00</span> / ${fmtTime(rec.durationMs)}</div>
         <div class="bar-track"><div class="bar-fill"></div></div>
+        ${transcriptHtml}
       </div>
       <button class="icon-btn dl" data-id="${rec.id}" title="ダウンロード">⬇</button>
       <button class="icon-btn del" data-id="${rec.id}" title="削除">✕</button>
@@ -524,6 +689,27 @@ function renderList() {
     });
   });
 }
+
+const importBtn = document.getElementById('importBtn');
+const fileInput = document.getElementById('fileInput');
+
+importBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', () => {
+  const files = Array.from(fileInput.files || []);
+  files.forEach(file => {
+    const url = URL.createObjectURL(file);
+    const tempAudio = new Audio(url);
+    tempAudio.addEventListener('loadedmetadata', () => {
+      const now = new Date();
+      const id = `${now.getTime()}-${Math.random().toString(36).slice(2, 7)}`;
+      const durationMs = isFinite(tempAudio.duration) ? tempAudio.duration * 1000 : 0;
+      recordings.unshift({ id, url, durationMs, label: file.name, transcript: '' });
+      renderList();
+    });
+  });
+  fileInput.value = '';
+});
 
 initMic();
 </script>

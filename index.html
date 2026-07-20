@@ -228,6 +228,7 @@
         <div>経過時間 <b id="recTime">00:00</b></div>
       </div>
       <div style="flex:1"></div>
+      <label class="mute-toggle"><input type="checkbox" id="overlapToggle"> 重ねて追加（0秒から同時再生）</label>
       <button id="importBtn">ファイルを読み込む</button>
       <input type="file" id="fileInput" accept="audio/*" multiple hidden>
     </div>
@@ -235,6 +236,10 @@
 
   <div class="panel">
     <h2>Tracks <span style="font-weight:400" id="trackCount"></span></h2>
+    <div class="export-row" style="margin-bottom:16px;">
+      <button id="overlapAllBtn" disabled>全トラックを重ねる（0秒に揃えて合成）</button>
+      <button id="stackEndBtn" disabled>全トラックを連結（末尾に順番に並べる）</button>
+    </div>
     <div id="trackList"></div>
     <div class="empty" id="emptyState">まだテイクがありません。上の録音ボタンでテイクを追加してください。</div>
   </div>
@@ -277,6 +282,9 @@
   const recTime = document.getElementById('recTime');
   const importBtn = document.getElementById('importBtn');
   const fileInput = document.getElementById('fileInput');
+  const overlapToggle = document.getElementById('overlapToggle');
+  const overlapAllBtn = document.getElementById('overlapAllBtn');
+  const stackEndBtn = document.getElementById('stackEndBtn');
   const exportBtn = document.getElementById('exportBtn');
   const formatSelect = document.getElementById('formatSelect');
   const exportStatus = document.getElementById('exportStatus');
@@ -390,6 +398,8 @@
   }
 
   function deleteTrack(id){
+    const t = tracks.find(tr => tr.id === id);
+    if (t) stopTrackPlayback(t);
     tracks = tracks.filter(t => t.id !== id);
     renderTracks();
     invalidateMix();
@@ -447,6 +457,7 @@
           <div class="track-actions">
             <label class="mute-toggle"><input type="checkbox" data-role="mute" ${t.muted?'checked':''}> ミュート</label>
             <button data-role="play">▶ 再生</button>
+            <button data-role="stop" disabled>■ 停止</button>
             <button data-role="delete">削除</button>
           </div>
         </div>
@@ -495,15 +506,41 @@
         invalidateMix();
       });
       el.querySelector('[data-role="delete"]').addEventListener('click', () => deleteTrack(t.id));
-      el.querySelector('[data-role="play"]').addEventListener('click', () => {
+
+      const playBtn = el.querySelector('[data-role="play"]');
+      const stopBtn = el.querySelector('[data-role="stop"]');
+
+      playBtn.addEventListener('click', () => {
+        stopTrackPlayback(t);
         const src = ctx().createBufferSource();
         src.buffer = t.buffer;
         const g = ctx().createGain();
         g.gain.value = t.volume;
         src.connect(g).connect(ctx().destination);
+        src.onended = () => {
+          if (t._playSource === src) t._playSource = null;
+          playBtn.textContent = '▶ 再生';
+          stopBtn.disabled = true;
+        };
         src.start(0, t.trimStart, t.trimEnd - t.trimStart);
+        t._playSource = src;
+        playBtn.textContent = '▶ 再生中…';
+        stopBtn.disabled = false;
+      });
+
+      stopBtn.addEventListener('click', () => {
+        stopTrackPlayback(t);
+        playBtn.textContent = '▶ 再生';
+        stopBtn.disabled = true;
       });
     });
+  }
+
+  function stopTrackPlayback(t){
+    if (t._playSource) {
+      try { t._playSource.onended = null; t._playSource.stop(); } catch(e){}
+      t._playSource = null;
+    }
   }
 
   // ---------- Mixing ----------
